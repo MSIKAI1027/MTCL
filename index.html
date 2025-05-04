@@ -1,180 +1,71 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>ESP32 自動化控制系統</title>
+  <meta charset="utf-8">
+  <title>ESP32 GPIO 控制面板</title>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-  />
+  <style>
+    table, th, td { border: 1px solid black; border-collapse: collapse; padding: 6px; }
+    .status { width: 60px; text-align: center; }
+    .btn { cursor: pointer; padding: 4px 8px; }
+    .disabled { color: gray; cursor: not-allowed; }
+  </style>
 </head>
-<body class="p-4">
-  <h3 class="mb-4">ESP32 自動化控制系統</h3>
-
-  <!-- Nav tabs -->
-  <ul class="nav nav-tabs" id="mainTab" role="tablist">
-    <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="tab-config" data-bs-toggle="tab" data-bs-target="#pane-config" type="button" role="tab">IO 設定</button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tab-manage" data-bs-toggle="tab" data-bs-target="#pane-manage" type="button" role="tab">管理介面</button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tab-logic" data-bs-toggle="tab" data-bs-target="#pane-logic" type="button" role="tab">自動控制設定</button>
-    </li>
-  </ul>
-
-  <!-- Tab panes -->
-  <div class="tab-content mt-3">
-    <!-- 1. IO 設定 -->
-    <div class="tab-pane fade show active" id="pane-config" role="tabpanel">
-      <form id="configForm" class="table-responsive">
-        <table class="table table-bordered text-center">
-          <thead>
-            <tr><th>編號</th><th>GPIO</th><th>名稱</th><th>模式</th><th>單位</th></tr>
-          </thead>
-          <tbody>
-            <script>
-              const validPins = [2,4,5,12,13,14,15,18,19,21];
-              for (let i = 0; i < 10; i++) {
-                document.write(`
-                  <tr>
-                    <td>${i+1}</td>
-                    <td>GPIO ${validPins[i]}</td>
-                    <td><input type="text" class="form-control" name="name${i}" placeholder="請設定名稱" value="GPIO ${validPins[i]}" /></td>
-                    <td>
-                      <select name="mode${i}" class="form-select">
-                        <option value="input">input</option>
-                        <option value="output">output</option>
-                      </select>
-                    </td>
-                    <td><input type="text" class="form-control" name="unit${i}" placeholder="請設定單位" value="" /></td>
-                  </tr>
-                `);
-              }
-            </script>
-          </tbody>
-        </table>
-        <button class="btn btn-primary">存檔並套用</button>
-      </form>
-    </div>
-
-    <!-- 2. 管理介面 -->
-    <div class="tab-pane fade" id="pane-manage" role="tabpanel">
-      <table class="table table-bordered text-center">
-        <thead>
-          <tr><th>編號</th><th>名稱</th><th>模式</th><th>動作模式</th><th>指示燈</th><th>狀態</th><th>單位</th><th>遠端開關</th></tr>
-        </thead>
-        <tbody id="manageBody">
-          <!-- 由 JS 動態填入 -->
-        </tbody>
-      </table>
-    </div>
-
-    <!-- 3. 自動控制設定 -->
-    <div class="tab-pane fade" id="pane-logic" role="tabpanel">
-      <p>自動控制設定頁面尚在構思中，未來可在此定義 IF / AND / OR / OUT 等邏輯。</p>
-      <!-- 範例輸入區塊 -->
-      <textarea id="logicTextarea" class="form-control" rows="5" placeholder="EX: IF 2 AND 4 HIGH THEN 12 OUT"></textarea>
-      <button id="saveLogicBtn" class="btn btn-secondary mt-2">存檔邏輯</button>
-    </div>
-  </div>
-
-  <pre class="mt-4" id="log">連線中...</pre>
+<body>
+  <h2>ESP32 GPIO 控制面板</h2>
+  <table id="gpioTable">
+    <tr><th>Index</th><th>Pin</th><th>Mode</th><th>Name</th><th>Unit</th><th>Status</th><th>Control</th></tr>
+  </table>
 
   <script>
-    const client = mqtt.connect('wss://broker.mqttgo.io:8084/mqtt', {
-      clean: true, clientId: 'web_' + Math.random().toString(16).substr(2,8), protocolVersion: 4, reconnectPeriod: 1000
-    });
-    const log = msg => document.getElementById('log').textContent += `\n${msg}`;
+    const client = mqtt.connect("wss://broker.mqttgo.io:8084/mqtt");
 
-    // 初始化管理表格
-    const manageBody = document.getElementById('manageBody');
-    for (let i = 0; i < 10; i++) {
-      manageBody.insertAdjacentHTML('beforeend', `
-        <tr id="row${i}">
-          <td>${i+1}</td>
-          <td id="m_name${i}">GPIO ${validPins[i]}</td>
-          <td id="m_mode${i}">-</td>
-          <td id="m_ctrl${i}">遠端</td>
-          <td>
-            <button id="led${i}" class="btn btn-sm btn-outline-secondary" disabled>無效</button>
-          </td>
-          <td id="m_state${i}">-</td>
-          <td id="m_unit${i}">-</td>
-          <td>
-            <button class="btn btn-sm btn-outline-primary" onclick="toggleIO(${i})">切換</button>
-          </td>
-        </tr>
-      `);
-    }
+    let gpioData = [];
 
     client.on('connect', () => {
-      log('✅ 已連線 MQTT');
-      client.subscribe('esp32/status');      // ESP32 回傳即時狀態
-      client.subscribe('esp32/ack_config');  // ESP32 回傳設定完成
+      console.log("MQTT Connected");
+      client.subscribe("esp32/config");
+      client.subscribe("esp32/status");
     });
 
     client.on('message', (topic, message) => {
-      const msg = message.toString();
-      log(`📨 ${topic}: ${msg}`);
-      if (topic === 'esp32/status') {
-        // 範例 payload: {"index":2,"mode":"output","state":"high","unit":"V"}
-        const s = JSON.parse(msg);
-        document.getElementById(`m_mode${s.index}`).innerText = s.mode;
-        document.getElementById(`m_state${s.index}`).innerText = s.state;
-        document.getElementById(`m_unit${s.index}`).innerText = s.unit || '-';
-        document.getElementById(`m_name${s.index}`).innerText = document.querySelector(`input[name="name${s.index}"]`).value || `GPIO ${validPins[s.index]}`;
+      const data = JSON.parse(message.toString());
 
-        // 指示燈狀態處理
-        if (s.mode === 'output') {
-          const led = document.getElementById(`led${s.index}`);
-          led.disabled = false;
-          led.className = s.state === 'high' ? 'btn btn-sm btn-outline-danger' : 'btn btn-sm btn-outline-success';
-          led.innerText = s.state === 'high' ? '開' : '關';
-        }
-
-        // 顯示遠端/自動模式
-        document.getElementById(`m_ctrl${s.index}`).innerText = s.state === 'high' ? '自動' : '遠端';
-      }
-      if (topic === 'esp32/ack_config') {
-        log('🎉 IO 設定已生效');
+      if (topic === "esp32/config") {
+        gpioData = data.gpio;
+        renderTable();
+      } else if (topic === "esp32/status") {
+        const row = document.getElementById("row-" + data.index);
+        row.querySelector(".status").innerText = data.state.toUpperCase();
       }
     });
 
-    // IO 設定存檔
-    document.getElementById('configForm').addEventListener('submit', e => {
-      e.preventDefault();
-      const cfg = { gpio: [], logic: document.getElementById('logicTextarea').value };
-      for (let i = 0; i < 10; i++) {
-        cfg.gpio.push({
-          index: i,
-          pin: validPins[i],
-          mode: e.target[`mode${i}`].value,
-          name: e.target[`name${i}`].value,
-          unit: e.target[`unit${i}`].value
-        });
-      }
-      client.publish('esp32/config', JSON.stringify(cfg));
-      log('📤 發送 IO 設定');
-    });
-
-    // 遠端開關某一組 IO
-    function toggleIO(idx) {
-      const msg = { index: idx, cmd: 'toggle' };
-      client.publish('esp32/control', JSON.stringify(msg));
-      log(`📤 切換 IO ${idx}`);
+    function renderTable() {
+      const table = document.getElementById("gpioTable");
+      table.innerHTML = `<tr><th>Index</th><th>Pin</th><th>Mode</th><th>Name</th><th>Unit</th><th>Status</th><th>Control</th></tr>`;
+      gpioData.forEach((gpio, i) => {
+        const tr = document.createElement("tr");
+        tr.id = "row-" + gpio.index;
+        tr.innerHTML = `
+          <td>${gpio.index}</td>
+          <td>${gpio.pin}</td>
+          <td>${gpio.mode}</td>
+          <td contenteditable="true">${gpio.name}</td>
+          <td contenteditable="true">${gpio.unit}</td>
+          <td class="status">?</td>
+          <td>
+            ${gpio.mode === "output"
+              ? `<button class="btn" onclick="toggle(${gpio.index})">切換</button>`
+              : `<span class="btn disabled">無效</span>`}
+          </td>
+        `;
+        table.appendChild(tr);
+      });
     }
 
-    // 邏輯存檔
-    document.getElementById('saveLogicBtn').addEventListener('click', () => {
-      const logic = document.getElementById('logicTextarea').value;
-      client.publish('esp32/config', JSON.stringify({ gpio: [], logic }));
-      log('📤 發送自動控制邏輯');
-    });
+    function toggle(index) {
+      client.publish("esp32/control", JSON.stringify({ index }));
+    }
   </script>
-
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
