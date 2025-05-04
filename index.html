@@ -32,7 +32,7 @@
       <form id="configForm" class="table-responsive">
         <table class="table table-bordered text-center">
           <thead>
-            <tr><th>編號</th><th>GPIO</th><th>模式</th></tr>
+            <tr><th>編號</th><th>GPIO</th><th>名稱</th><th>模式</th><th>單位</th></tr>
           </thead>
           <tbody>
             <script>
@@ -42,12 +42,14 @@
                   <tr>
                     <td>${i+1}</td>
                     <td>GPIO ${validPins[i]}</td>
+                    <td><input type="text" class="form-control" name="name${i}" placeholder="請設定名稱" value="GPIO ${validPins[i]}" /></td>
                     <td>
                       <select name="mode${i}" class="form-select">
                         <option value="input">input</option>
                         <option value="output">output</option>
                       </select>
                     </td>
+                    <td><input type="text" class="form-control" name="unit${i}" placeholder="請設定單位" value="" /></td>
                   </tr>
                 `);
               }
@@ -62,7 +64,7 @@
     <div class="tab-pane fade" id="pane-manage" role="tabpanel">
       <table class="table table-bordered text-center">
         <thead>
-          <tr><th>編號</th><th>GPIO</th><th>模式</th><th>動作模式</th><th>指示燈</th><th>狀態</th><th>單位</th><th>遠端開關</th></tr>
+          <tr><th>編號</th><th>名稱</th><th>模式</th><th>動作模式</th><th>指示燈</th><th>狀態</th><th>單位</th><th>遠端開關</th></tr>
         </thead>
         <tbody id="manageBody">
           <!-- 由 JS 動態填入 -->
@@ -88,16 +90,17 @@
     const log = msg => document.getElementById('log').textContent += `\n${msg}`;
 
     // 初始化管理表格
+    const validPins = [2,4,5,12,13,14,15,18,19,21];
     const manageBody = document.getElementById('manageBody');
-    for (let i=0; i<10; i++) {
+    for (let i = 0; i < 10; i++) {
       manageBody.insertAdjacentHTML('beforeend', `
         <tr id="row${i}">
           <td>${i+1}</td>
-          <td>GPIO ${validPins[i]}</td>
+          <td id="m_name${i}">GPIO ${validPins[i]}</td>
           <td id="m_mode${i}">-</td>
           <td id="m_ctrl${i}">遠端</td>
           <td>
-            <span id="led${i}" class="badge bg-success">關</span>
+            <button id="led${i}" class="btn btn-sm btn-outline-secondary" disabled>無效</button>
           </td>
           <td id="m_state${i}">-</td>
           <td id="m_unit${i}">-</td>
@@ -117,16 +120,26 @@
     client.on('message', (topic, message) => {
       const msg = message.toString();
       log(`📨 ${topic}: ${msg}`);
-      if (topic==='esp32/status') {
+      if (topic === 'esp32/status') {
         // 範例 payload: {"index":2,"mode":"output","state":"high","unit":"V"}
         const s = JSON.parse(msg);
         document.getElementById(`m_mode${s.index}`).innerText = s.mode;
         document.getElementById(`m_state${s.index}`).innerText = s.state;
-        document.getElementById(`m_unit${s.index}`).innerText = s.unit||'-';
-        document.getElementById(`led${s.index}`).innerText = (s.state==='high'?'開':'關');
-        document.getElementById(`led${s.index}`).className = 'badge bg-' + (s.state==='high'? 'danger':'success');
+        document.getElementById(`m_unit${s.index}`).innerText = s.unit || '-';
+        document.getElementById(`m_name${s.index}`).innerText = document.querySelector(`input[name="name${s.index}"]`).value || `GPIO ${validPins[s.index]}`;
+
+        // 指示燈狀態處理
+        if (s.mode === 'output') {
+          const led = document.getElementById(`led${s.index}`);
+          led.disabled = false;
+          led.className = s.state === 'high' ? 'btn btn-sm btn-outline-danger' : 'btn btn-sm btn-outline-success';
+          led.innerText = s.state === 'high' ? '開' : '關';
+        }
+
+        // 顯示遠端/自動模式
+        document.getElementById(`m_ctrl${s.index}`).innerText = s.state === 'high' ? '自動' : '遠端';
       }
-      if (topic==='esp32/ack_config') {
+      if (topic === 'esp32/ack_config') {
         log('🎉 IO 設定已生效');
       }
     });
@@ -135,11 +148,13 @@
     document.getElementById('configForm').addEventListener('submit', e => {
       e.preventDefault();
       const cfg = { gpio: [], logic: document.getElementById('logicTextarea').value };
-      for (let i=0; i<10; i++) {
+      for (let i = 0; i < 10; i++) {
         cfg.gpio.push({
           index: i,
           pin: validPins[i],
-          mode: e.target[`mode${i}`].value
+          mode: e.target[`mode${i}`].value,
+          name: e.target[`name${i}`].value,
+          unit: e.target[`unit${i}`].value
         });
       }
       client.publish('esp32/config', JSON.stringify(cfg));
