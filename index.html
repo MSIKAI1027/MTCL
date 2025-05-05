@@ -2,45 +2,58 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
-  <title>ESP32 MQTT 控制介面</title>
+  <title>ESP32 GPIO 設定介面</title>
 </head>
 <body>
-  <h2>MQTT 控制面板</h2>
+  <h2>GPIO 設定</h2>
+  <form id="gpioForm">
+    <!-- 動態產生選單 -->
+  </form>
+  <button onclick="sendConfig()">送出設定</button>
 
-  <label for="valueInput">輸入值：</label>
-  <input type="text" id="valueInput" placeholder="例如: ON 或 OFF" />
-  <button onclick="sendMessage()">送出</button>
-
-  <h3>ESP32 回傳資料：</h3>
+  <h3>ESP32 回傳：</h3>
   <pre id="esp32Response">尚未收到資料</pre>
 
-  <!-- 引入 MQTT.js -->
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script>
-    // 連接 MQTT broker（此範例使用 mqttgo.io 公共 broker）
-    const client = mqtt.connect('wss://broker.mqttgo.io:8084/mqtt');
+    const gpioPins = [2, 4, 5, 12, 13, 14, 15, 18, 19, 21];
+    const form = document.getElementById("gpioForm");
 
-    const pubTopic = 'esp32/control';
-    const subTopic = 'esp32/response';
-
-    client.on('connect', () => {
-      console.log('✅ 已連接 MQTT broker');
-      client.subscribe(subTopic);
-    });
-
-    client.on('message', (topic, message) => {
-      if (topic === subTopic) {
-        document.getElementById('esp32Response').textContent = message.toString();
-      }
-    });
-
-    function sendMessage() {
-      const value = document.getElementById('valueInput').value;
-      const jsonPayload = JSON.stringify({
-        command: 'set',
-        value: value
+    // 動態建立下拉選單
+    gpioPins.forEach(pin => {
+      const label = document.createElement("label");
+      label.textContent = `GPIO ${pin}：`;
+      const select = document.createElement("select");
+      select.id = `gpio-${pin}`;
+      ["INPUT", "OUTPUT"].forEach(mode => {
+        const option = document.createElement("option");
+        option.value = mode;
+        option.text = mode;
+        select.appendChild(option);
       });
-      client.publish(pubTopic, jsonPayload);
+      form.appendChild(label);
+      form.appendChild(select);
+      form.appendChild(document.createElement("br"));
+    });
+
+    // 建立 MQTT 連線
+    const client = mqtt.connect("wss://broker.mqttgo.io:8084/mqtt");
+    client.on("connect", () => {
+      console.log("✅ 已連線 MQTT");
+      client.subscribe("esp32/response");
+    });
+
+    client.on("message", (topic, message) => {
+      document.getElementById("esp32Response").textContent = message.toString();
+    });
+
+    function sendConfig() {
+      const config = gpioPins.map(pin => {
+        const mode = document.getElementById(`gpio-${pin}`).value;
+        return { pin: pin, mode: mode };
+      });
+      const json = JSON.stringify(config);
+      client.publish("esp32/gpio_config", json);
     }
   </script>
 </body>
