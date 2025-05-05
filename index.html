@@ -84,7 +84,6 @@
   <pre class="mt-4" id="log">連線中...</pre>
 
   <script>
-  const validPins = [2, 4, 5, 12, 13, 14, 15, 18, 19, 21];
   const client = mqtt.connect('wss://broker.mqttgo.io:8084/mqtt', {
     clean: true,
     clientId: 'web_' + Math.random().toString(16).substr(2, 8),
